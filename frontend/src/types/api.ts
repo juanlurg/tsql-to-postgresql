@@ -51,6 +51,30 @@ export interface SchemaStatus {
   unmapped_columns: number
 }
 
+export interface TableItem {
+  schema_name: string
+  table_name: string
+}
+
+export interface SourceTableItem {
+  schema_name: string
+  table_name: string
+  mapped: boolean
+  tgt_schema: string | null
+  tgt_table: string | null
+}
+
+export interface TableMappingItem {
+  id: number
+  src_table_schema: string
+  src_table_name: string
+  tgt_table_schema: string
+  tgt_table_name: string
+  confidence: number
+  source: string
+  approved: boolean
+}
+
 export interface HistoryItem {
   id: number
   input_sql: string

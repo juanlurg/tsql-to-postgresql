@@ -77,6 +77,39 @@ class MappingPatchRequest(BaseModel):
     notes: str | None = None
 
 
+# ── Table Mappings ────────────────────────────────────────────────────────
+
+class TableItem(BaseModel):
+    schema_name: str
+    table_name: str
+
+
+class SourceTableItem(BaseModel):
+    schema_name: str
+    table_name: str
+    mapped: bool
+    tgt_schema: str | None
+    tgt_table: str | None
+
+
+class TableMappingItem(BaseModel):
+    id: int
+    src_table_schema: str
+    src_table_name: str
+    tgt_table_schema: str
+    tgt_table_name: str
+    confidence: float
+    source: str
+    approved: bool
+
+
+class TableMappingCreateRequest(BaseModel):
+    src_schema: str
+    src_table: str
+    tgt_schema: str
+    tgt_table: str
+
+
 # ── History ───────────────────────────────────────────────────────────────
 
 class HistoryItem(BaseModel):

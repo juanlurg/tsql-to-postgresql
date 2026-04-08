@@ -14,10 +14,14 @@ from tsql_migrator.api.models import (
     MappingItem,
     MappingPatchRequest,
     SchemaStatusResponse,
+    SourceTableItem,
+    TableItem,
+    TableMappingCreateRequest,
+    TableMappingItem,
 )
 from tsql_migrator.schema.ddl_parser import load_ddl_file
 from tsql_migrator.schema.mapping_engine import MappingEngine
-from tsql_migrator.schema.models import ColumnMapping
+from tsql_migrator.schema.models import ColumnMapping, SchemaSource, Table, TableMapping
 
 router = APIRouter(prefix="/schema", tags=["schema"])
 
@@ -110,6 +114,88 @@ async def list_mappings(
             )
             for r in rows
         ]
+
+
+@router.get("/tables/source", response_model=list[SourceTableItem])
+async def list_source_tables(registry: RegistryDep):
+    """List all source tables with their current table-mapping status."""
+    with Session(registry._engine) as session:
+        src_source = session.scalar(
+            select(SchemaSource).where(SchemaSource.dialect == "tsql")
+            .order_by(SchemaSource.id.desc())
+        )
+        if src_source is None:
+            return []
+        tables = session.scalars(
+            select(Table).where(Table.source_id == src_source.id)
+            .order_by(Table.schema_name, Table.table_name)
+        ).all()
+        # Build a lookup keyed by (UPPER(schema), lower(table))
+        all_tms = session.scalars(select(TableMapping)).all()
+        tm_lookup = {
+            (tm.src_table_schema, tm.src_table_name.lower()): tm
+            for tm in all_tms
+        }
+        result = []
+        for t in tables:
+            key = (t.schema_name.upper(), t.table_name.lower())
+            tm = tm_lookup.get(key)
+            result.append(SourceTableItem(
+                schema_name=t.schema_name,
+                table_name=t.table_name,
+                mapped=tm is not None,
+                tgt_schema=tm.tgt_table_schema if tm else None,
+                tgt_table=tm.tgt_table_name if tm else None,
+            ))
+        return result
+
+
+@router.get("/tables/target", response_model=list[TableItem])
+async def list_target_tables(registry: RegistryDep):
+    """List all target (Redshift) tables."""
+    with Session(registry._engine) as session:
+        tgt_source = session.scalar(
+            select(SchemaSource).where(SchemaSource.dialect == "redshift")
+            .order_by(SchemaSource.id.desc())
+        )
+        if tgt_source is None:
+            return []
+        tables = session.scalars(
+            select(Table).where(Table.source_id == tgt_source.id)
+            .order_by(Table.schema_name, Table.table_name)
+        ).all()
+        return [TableItem(schema_name=t.schema_name, table_name=t.table_name) for t in tables]
+
+
+@router.post("/table-mappings", response_model=TableMappingItem)
+async def save_table_mapping(body: TableMappingCreateRequest, registry: RegistryDep):
+    """Create or update a manual table mapping."""
+    registry.upsert_table_mapping(
+        src_schema=body.src_schema,
+        src_table=body.src_table,
+        tgt_schema=body.tgt_schema,
+        tgt_table=body.tgt_table,
+        confidence=1.0,
+        source="human",
+        approved=True,
+    )
+    with Session(registry._engine) as session:
+        tm = session.scalar(
+            select(TableMapping).where(
+                TableMapping.src_table_schema == body.src_schema.upper(),
+                TableMapping.src_table_name.ilike(body.src_table),
+            )
+        )
+        return TableMappingItem(
+            id=tm.id,
+            src_table_schema=tm.src_table_schema,
+            src_table_name=tm.src_table_name,
+            tgt_table_schema=tm.tgt_table_schema,
+            tgt_table_name=tm.tgt_table_name,
+            confidence=tm.confidence,
+            source=tm.source,
+            approved=tm.approved,
+        )
 
 
 @router.patch("/mappings/{mapping_id}", response_model=MappingItem)

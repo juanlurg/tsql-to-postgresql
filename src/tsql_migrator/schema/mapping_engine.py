@@ -165,10 +165,9 @@ class MappingEngine:
             tgt_data = tgt_tables_data.get(src_key)
 
             if tgt_data is None:
-                # Try fuzzy match on table name
-                _, src_tname = src_key
-                src_snake = _to_snake_case(src_tname)
-                for (_, tgt_tname_norm), td in tgt_tables_data.items():
+                # Try fuzzy match on table name using original casing so PascalCase→snake works
+                src_snake = _to_snake_case(src_data["table"])
+                for td in tgt_tables_data.values():
                     if _to_snake_case(td["table"]) == src_snake:
                         tgt_data = td
                         break

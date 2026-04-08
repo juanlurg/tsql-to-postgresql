@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react'
 import { useSchema } from '../hooks/useSchema'
+import { TableMappingsSection } from './TableMappingsSection'
+
+type SubTab = 'tables' | 'columns'
 
 export function SchemaPanel() {
   const { status, mappings, loading, loadMappings, approveMapping } = useSchema()
+  const [subTab, setSubTab] = useState<SubTab>('tables')
   const [pendingOnly, setPendingOnly] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
   const [editValue, setEditValue] = useState('')
 
   useEffect(() => {
-    loadMappings(pendingOnly)
-  }, [pendingOnly, loadMappings])
+    if (subTab === 'columns') loadMappings(pendingOnly)
+  }, [pendingOnly, loadMappings, subTab])
 
   const handleApprove = async (id: number) => {
     const mapping = mappings.find(m => m.id === id)
@@ -33,84 +37,127 @@ export function SchemaPanel() {
         </div>
       )}
 
-      {/* Filter toggle */}
-      <div style={{ padding: '8px 12px', borderBottom: '1px solid #2d3748', display: 'flex', gap: 12, alignItems: 'center' }}>
-        <label style={{ fontSize: 12, color: '#a0aec0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <input
-            type="checkbox"
-            checked={pendingOnly}
-            onChange={e => setPendingOnly(e.target.checked)}
-          />
-          Show pending only
-        </label>
-        <span style={{ fontSize: 12, color: '#4a5568' }}>{mappings.length} rows</span>
+      {/* Sub-tabs */}
+      <div style={subTabBarStyle}>
+        {(['tables', 'columns'] as SubTab[]).map(t => (
+          <button
+            key={t}
+            onClick={() => setSubTab(t)}
+            style={{
+              ...subTabBtnStyle,
+              color: subTab === t ? '#e2e8f0' : '#718096',
+              borderBottom: subTab === t ? '2px solid #63b3ed' : '2px solid transparent',
+            }}
+          >
+            {t === 'tables' ? 'Table Mappings' : 'Column Mappings'}
+          </button>
+        ))}
       </div>
 
-      {/* Mapping table */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {loading ? (
-          <div style={{ padding: 16, color: '#4a5568' }}>Loading…</div>
-        ) : mappings.length === 0 ? (
-          <div style={{ padding: 16, color: '#4a5568' }}>
-            No mappings found. Load DDL files with the CLI: <br />
-            <code style={{ color: '#63b3ed' }}>tsql-migrator schema load-source --file schema.sql</code>
-          </div>
+      {/* Content */}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {subTab === 'tables' ? (
+          <TableMappingsSection />
         ) : (
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                {['Source Table', 'Source Column', 'Target Column', 'Confidence', 'Status', ''].map(h => (
-                  <th key={h} style={thStyle}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {mappings.map(m => (
-                <tr key={m.id} style={{ background: m.approved ? 'transparent' : '#1a1f2e' }}>
-                  <td style={tdStyle}>{m.src_table_name}</td>
-                  <td style={tdStyle}>{m.src_column_name}</td>
-                  <td style={tdStyle}>
-                    {editId === m.id ? (
-                      <input
-                        value={editValue}
-                        onChange={e => setEditValue(e.target.value)}
-                        style={inputStyle}
-                        autoFocus
-                        onKeyDown={e => { if (e.key === 'Enter') handleApprove(m.id) }}
-                      />
-                    ) : (
-                      <span
-                        style={{ color: m.tgt_column_name ? '#e2e8f0' : '#fc8181', cursor: 'pointer' }}
-                        onClick={() => { setEditId(m.id); setEditValue(m.tgt_column_name ?? '') }}
-                      >
-                        {m.tgt_column_name ?? '⚠ unmapped'}
-                      </span>
-                    )}
-                  </td>
-                  <td style={{ ...tdStyle, color: m.confidence >= 0.9 ? '#68d391' : '#f6ad55' }}>
-                    {(m.confidence * 100).toFixed(0)}%
-                  </td>
-                  <td style={tdStyle}>
-                    {m.approved
-                      ? <span style={{ color: '#68d391' }}>✓ approved</span>
-                      : <span style={{ color: '#f6ad55' }}>pending</span>
-                    }
-                  </td>
-                  <td style={tdStyle}>
-                    {!m.approved && (
-                      <button onClick={() => handleApprove(m.id)} style={btnStyle}>
-                        Approve
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <>
+            {/* Filter toggle */}
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid #2d3748', display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
+              <label style={{ fontSize: 12, color: '#a0aec0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={pendingOnly}
+                  onChange={e => setPendingOnly(e.target.checked)}
+                />
+                Show pending only
+              </label>
+              <span style={{ fontSize: 12, color: '#4a5568' }}>{mappings.length} rows</span>
+            </div>
+
+            {/* Mapping table */}
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {loading ? (
+                <div style={{ padding: 16, color: '#4a5568' }}>Loading…</div>
+              ) : mappings.length === 0 ? (
+                <div style={{ padding: 16, color: '#4a5568' }}>
+                  No mappings found. Load DDL files with the CLI: <br />
+                  <code style={{ color: '#63b3ed' }}>tsql-migrator schema load-source --file schema.sql</code>
+                </div>
+              ) : (
+                <table style={tableStyle}>
+                  <thead>
+                    <tr>
+                      {['Source Table', 'Source Column', 'Target Column', 'Confidence', 'Status', ''].map(h => (
+                        <th key={h} style={thStyle}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mappings.map(m => (
+                      <tr key={m.id} style={{ background: m.approved ? 'transparent' : '#1a1f2e' }}>
+                        <td style={tdStyle}>{m.src_table_name}</td>
+                        <td style={tdStyle}>{m.src_column_name}</td>
+                        <td style={tdStyle}>
+                          {editId === m.id ? (
+                            <input
+                              value={editValue}
+                              onChange={e => setEditValue(e.target.value)}
+                              style={inputStyle}
+                              autoFocus
+                              onKeyDown={e => { if (e.key === 'Enter') handleApprove(m.id) }}
+                            />
+                          ) : (
+                            <span
+                              style={{ color: m.tgt_column_name ? '#e2e8f0' : '#fc8181', cursor: 'pointer' }}
+                              onClick={() => { setEditId(m.id); setEditValue(m.tgt_column_name ?? '') }}
+                            >
+                              {m.tgt_column_name ?? '⚠ unmapped'}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ ...tdStyle, color: m.confidence >= 0.9 ? '#68d391' : '#f6ad55' }}>
+                          {(m.confidence * 100).toFixed(0)}%
+                        </td>
+                        <td style={tdStyle}>
+                          {m.approved
+                            ? <span style={{ color: '#68d391' }}>✓ approved</span>
+                            : <span style={{ color: '#f6ad55' }}>pending</span>
+                          }
+                        </td>
+                        <td style={tdStyle}>
+                          {!m.approved && (
+                            <button onClick={() => handleApprove(m.id)} style={btnStyle}>
+                              Approve
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>
   )
+}
+
+const subTabBarStyle: React.CSSProperties = {
+  display: 'flex',
+  borderBottom: '1px solid #2d3748',
+  background: '#0f1117',
+  flexShrink: 0,
+}
+
+const subTabBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  padding: '0 16px',
+  height: 36,
+  fontSize: 12,
+  fontWeight: 500,
 }
 
 const statusBarStyle: React.CSSProperties = {

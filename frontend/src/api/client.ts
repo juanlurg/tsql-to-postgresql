@@ -1,4 +1,4 @@
-import type { HistoryItem, MappingItem, SchemaStatus, TranslateRequest, TranslateResponse } from '../types/api'
+import type { HistoryItem, MappingItem, SchemaStatus, SourceTableItem, TableItem, TableMappingItem, TranslateRequest, TranslateResponse } from '../types/api'
 
 const BASE = '/api'
 
@@ -44,6 +44,10 @@ export const api = {
     updateMapping: (id: number, body: { tgt_column_name?: string | null; approved?: boolean; notes?: string }) =>
       patch<MappingItem>(`/schema/mappings/${id}`, body),
     runDiff: () => post<{ total: number; approved: number; pending: number }>('/schema/diff', {}),
+    sourceTables: () => get<SourceTableItem[]>('/schema/tables/source'),
+    targetTables: () => get<TableItem[]>('/schema/tables/target'),
+    saveTableMapping: (body: { src_schema: string; src_table: string; tgt_schema: string; tgt_table: string }) =>
+      post<TableMappingItem>('/schema/table-mappings', body),
   },
   history: (limit = 20) => get<HistoryItem[]>('/history', { limit }),
 }
