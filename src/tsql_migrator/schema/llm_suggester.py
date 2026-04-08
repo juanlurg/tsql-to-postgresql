@@ -21,8 +21,9 @@ import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-import google.generativeai as genai
-from google.api_core import exceptions as google_exceptions
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from tsql_migrator.errors import LLMError
@@ -78,16 +79,9 @@ class LLMSuggester:
                 "GEMINI_API_KEY environment variable is not set. "
                 "LLM mapping assistance is unavailable."
             )
-        genai.configure(api_key=api_key)
-        model_name = model or os.getenv("LLM_MODEL", "gemini-3-flash-preview")
-        self._model = genai.GenerativeModel(
-            model_name=model_name,
-            system_instruction=MAPPING_SUGGESTION_SYSTEM_PROMPT,
-            generation_config=genai.GenerationConfig(
-                temperature=0,
-                max_output_tokens=2048,
-            ),
-        )
+        self._client = genai.Client(api_key=api_key)
+        self._model_name = model or os.getenv("LLM_MODEL", "gemini-2.0-flash")
+        self._system_instruction = MAPPING_SUGGESTION_SYSTEM_PROMPT
         self._registry = registry
 
     def suggest(
@@ -199,17 +193,23 @@ class LLMSuggester:
         return rows
 
     @retry(
-        retry=retry_if_exception_type(
-            (google_exceptions.ResourceExhausted, google_exceptions.DeadlineExceeded)
-        ),
+        retry=retry_if_exception_type(genai_errors.APIError),
         wait=wait_exponential(multiplier=1, min=2, max=30),
         stop=stop_after_attempt(3),
         reraise=True,
     )
     def _call_llm(self, prompt: str) -> str:
         try:
-            response = self._model.generate_content(prompt)
-        except google_exceptions.GoogleAPIError as e:
+            response = self._client.models.generate_content(
+                model=self._model_name,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=self._system_instruction,
+                    temperature=0,
+                    max_output_tokens=2048,
+                ),
+            )
+        except genai_errors.APIError as e:
             raise LLMError(f"Gemini API error during mapping suggestion: {e}") from e
         return response.text or ""
 

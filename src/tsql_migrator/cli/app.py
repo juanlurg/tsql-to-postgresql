@@ -2,6 +2,10 @@
 tsql-migrator CLI — root app.
 """
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import typer
 
 from tsql_migrator.cli.translate_cmd import translate_app
