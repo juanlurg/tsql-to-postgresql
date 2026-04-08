@@ -4,6 +4,7 @@ DDL Parser: parse CREATE TABLE statements and load them into the SchemaRegistry.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -38,9 +39,13 @@ def load_ddl_file(
         SchemaError: if the file cannot be read or parsed.
     """
     try:
-        ddl_text = Path(path).read_text(encoding="utf-8")
+        ddl_text = Path(path).read_text(encoding="utf-8-sig")
     except OSError as e:
         raise SchemaError(f"Cannot read DDL file '{path}': {e}") from e
+
+    # Strip T-SQL batch separators and USE statements that confuse sqlglot
+    ddl_text = re.sub(r"^\s*GO\s*$", "", ddl_text, flags=re.IGNORECASE | re.MULTILINE)
+    ddl_text = re.sub(r"^\s*USE\s+\S+\s*;?\s*$", "", ddl_text, flags=re.IGNORECASE | re.MULTILINE)
 
     try:
         statements = sqlglot.parse(ddl_text, dialect=dialect, error_level=sqlglot.ErrorLevel.WARN)
