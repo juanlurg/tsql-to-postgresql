@@ -1,0 +1,112 @@
+"""
+LLM client: wraps the Google Gemini API for SQL translation fallback.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass, field
+
+import google.generativeai as genai
+from google.api_core import exceptions as google_exceptions
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+from tsql_migrator.errors import LLMError
+from tsql_migrator.llm.prompts import SYSTEM_PROMPT, build_user_prompt
+
+
+@dataclass
+class LLMTranslationResult:
+    translated_sql: str
+    changes_made: list[str] = field(default_factory=list)
+    unmapped_columns: list[str] = field(default_factory=list)
+    confidence: str = "medium"   # "high" | "medium" | "low"
+    migration_todos: list[str] = field(default_factory=list)
+
+
+class LLMClient:
+    """Thin wrapper around the Google Gemini API."""
+
+    def __init__(
+        self,
+        model: str | None = None,
+        max_tokens: int = 4096,
+    ) -> None:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise LLMError(
+                "GEMINI_API_KEY environment variable is not set. "
+                "LLM translation is unavailable."
+            )
+        genai.configure(api_key=api_key)
+        model_name = model or os.getenv("LLM_MODEL", "gemini-3-flash-preview")
+        self._model = genai.GenerativeModel(
+            model_name=model_name,
+            system_instruction=SYSTEM_PROMPT,
+            generation_config=genai.GenerationConfig(
+                temperature=0,
+                max_output_tokens=max_tokens,
+            ),
+        )
+
+    @retry(
+        retry=retry_if_exception_type(
+            (google_exceptions.ResourceExhausted, google_exceptions.DeadlineExceeded)
+        ),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
+    def translate(
+        self,
+        tsql: str,
+        ddl_context: str | None = None,
+        error_context: str | None = None,
+    ) -> LLMTranslationResult:
+        """
+        Translate T-SQL to Redshift SQL via the Gemini API.
+
+        Returns LLMTranslationResult with structured output.
+        Raises LLMError if the response cannot be parsed or validated.
+        """
+        user_message = build_user_prompt(
+            tsql=tsql,
+            ddl_context=ddl_context,
+            error_context=error_context,
+        )
+
+        try:
+            response = self._model.generate_content(user_message)
+        except google_exceptions.GoogleAPIError as e:
+            raise LLMError(f"Gemini API error: {e}") from e
+
+        content = response.text if response.text else ""
+        return self._parse_response(content)
+
+    def _parse_response(self, content: str) -> LLMTranslationResult:
+        """Parse and validate the LLM JSON response."""
+        # Strip markdown fences if the model added them despite instructions
+        stripped = content.strip()
+        if stripped.startswith("```"):
+            lines = stripped.splitlines()
+            stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError as e:
+            raise LLMError(
+                f"LLM returned non-JSON response: {e}\n\nResponse:\n{content[:500]}"
+            ) from e
+
+        translated_sql = data.get("translated_sql", "")
+        if not translated_sql or not isinstance(translated_sql, str):
+            raise LLMError("LLM response missing 'translated_sql' field.")
+
+        return LLMTranslationResult(
+            translated_sql=translated_sql,
+            changes_made=data.get("changes_made", []),
+            unmapped_columns=data.get("unmapped_columns", []),
+            confidence=data.get("confidence", "medium"),
+            migration_todos=data.get("migration_todos", []),
+        )

@@ -1,0 +1,50 @@
+# Declarative function rewrite rules.
+# These cover simple renames and argument reorders.
+# Complex rewrites (DATEPART, TRY_CAST, CONVERT, etc.) are handled by
+# dedicated _rewrite_* methods in function_rewriter.py.
+
+# ── Simple renames ─────────────────────────────────────────────────────────
+
+- tsql_name: ISNULL
+  redshift_name: COALESCE
+  arg_count: 2
+
+- tsql_name: LEN
+  redshift_name: LEN
+  arg_count: 1
+
+- tsql_name: REPLICATE
+  redshift_name: REPEAT
+  arg_count: 2
+
+- tsql_name: EOMONTH
+  redshift_name: LAST_DAY
+  arg_count: 1
+
+- tsql_name: COUNT_BIG
+  redshift_name: COUNT
+
+- tsql_name: STDEV
+  redshift_name: STDDEV
+
+- tsql_name: STDEVP
+  redshift_name: STDDEV_POP
+
+- tsql_name: VAR
+  redshift_name: VARIANCE
+
+- tsql_name: VARP
+  redshift_name: VAR_POP
+
+- tsql_name: SQUARE
+  redshift_name: POWER
+  arg_count: 1
+  warn_message: "SQUARE(x) mapped to POWER(x, 2) — verify result type"
+
+- tsql_name: NEWID
+  redshift_name: MD5
+  warn_message: "NEWID() has no Redshift equivalent. Mapped to MD5(RANDOM()::VARCHAR) — replace with appropriate UUID logic if needed."
+
+# ── Argument-reorder rewrites ───────────────────────────────────────────────
+# (CHARINDEX is handled in function_rewriter.py because it needs special-case
+#  handling for the 3-argument form)

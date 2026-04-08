@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tsql-migrator"
+version = "0.1.0"
+description = "Translate T-SQL (SQL Server) queries to Amazon Redshift SQL"
+requires-python = ">=3.12"
+dependencies = [
+    "sqlglot>=30.3",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "python-multipart>=0.0.20",
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.21",
+    "typer>=0.15",
+    "rich>=14.0",
+    "google-generativeai>=0.8",
+    "tenacity>=9.1",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.9",
+    "python-dotenv>=1.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+redshift = [
+    "redshift-connector>=2.1",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.1",
+    "httpx>=0.28",
+    "ruff>=0.11",
+    "mypy>=1.15",
+]
+
+[project.scripts]
+tsql-migrator = "tsql_migrator.cli.app:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tsql_migrator"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

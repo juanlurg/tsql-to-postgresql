@@ -1,0 +1,73 @@
+# Declarative data type mapping rules (for reference).
+# The actual mapping is implemented in transforms/datatype_converter.py.
+# This file documents the rules and can be used to regenerate the converter.
+
+- tsql: NVARCHAR
+  redshift: VARCHAR
+  preserve_precision: true
+  notes: "Redshift is UTF-8; NVARCHAR prefix is unnecessary"
+
+- tsql: NCHAR
+  redshift: CHAR
+  preserve_precision: true
+
+- tsql: BIT
+  redshift: BOOLEAN
+
+- tsql: DATETIME
+  redshift: TIMESTAMP
+  notes: "Loses sub-millisecond precision; DATETIME2 should also map to TIMESTAMP"
+
+- tsql: DATETIME2
+  redshift: TIMESTAMP
+
+- tsql: SMALLDATETIME
+  redshift: TIMESTAMP
+
+- tsql: DATETIMEOFFSET
+  redshift: TIMESTAMPTZ
+
+- tsql: MONEY
+  redshift: DECIMAL
+  precision: 19
+  scale: 4
+
+- tsql: SMALLMONEY
+  redshift: DECIMAL
+  precision: 10
+  scale: 4
+
+- tsql: TINYINT
+  redshift: SMALLINT
+  notes: "Redshift has no TINYINT (0-255 range); SMALLINT is safe"
+
+- tsql: UNIQUEIDENTIFIER
+  redshift: VARCHAR
+  precision: 36
+  warn: true
+
+- tsql: TEXT
+  redshift: VARCHAR
+  precision: 65535
+  warn: true
+
+- tsql: NTEXT
+  redshift: VARCHAR
+  precision: 65535
+  warn: true
+
+- tsql: IMAGE
+  redshift: VARCHAR
+  precision: 65535
+  warn: true
+
+- tsql: XML
+  redshift: VARCHAR
+  precision: 65535
+  warn: true
+
+- tsql: REAL
+  redshift: FLOAT4
+
+- tsql: FLOAT
+  redshift: FLOAT8

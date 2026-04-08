@@ -1,0 +1,48 @@
+# Syntax rewrite rules documentation.
+# Implemented in transforms/syntax_rewriter.py.
+
+constructs:
+  - name: "SELECT TOP n"
+    action: rewrite
+    redshift_equivalent: "SELECT ... LIMIT n"
+    notes: "TOP is at the front; LIMIT is at the end — positional transformation required"
+
+  - name: "SELECT TOP n WITH TIES"
+    action: warn_and_flag
+    notes: "No direct equivalent; use RANK()/DENSE_RANK() window functions"
+
+  - name: "SELECT TOP n PERCENT"
+    action: warn_and_flag
+    notes: "No direct equivalent; use LIMIT (SELECT CEIL(COUNT(*) * 0.n) FROM ...)"
+
+  - name: "WITH (NOLOCK)"
+    action: strip
+    notes: "Redshift uses MVCC; table hints are irrelevant and invalid"
+
+  - name: "CROSS APPLY"
+    action: rewrite
+    redshift_equivalent: "CROSS JOIN LATERAL"
+
+  - name: "OUTER APPLY"
+    action: rewrite
+    redshift_equivalent: "LEFT JOIN LATERAL ... ON TRUE"
+
+  - name: "SELECT INTO #temp"
+    action: rewrite
+    redshift_equivalent: "CREATE TEMP TABLE temp AS SELECT ..."
+
+  - name: "PIVOT"
+    action: flag_for_llm
+    notes: "Rewrite as MAX(CASE WHEN col = 'val' THEN measure END) ... GROUP BY"
+
+  - name: "UNPIVOT"
+    action: flag_for_llm
+    notes: "Rewrite as UNION ALL or CROSS JOIN LATERAL"
+
+  - name: "FOR XML PATH"
+    action: hard_error
+    notes: "No XML support in Redshift; use LISTAGG or handle in application code"
+
+  - name: "+ string concatenation"
+    action: warn
+    notes: "Redshift requires || for string concatenation; + works for numbers only"
