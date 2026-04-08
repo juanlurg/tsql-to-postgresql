@@ -43,9 +43,14 @@ def load_ddl_file(
     except OSError as e:
         raise SchemaError(f"Cannot read DDL file '{path}': {e}") from e
 
-    # Strip T-SQL batch separators and USE statements that confuse sqlglot
+    # Strip T-SQL constructs that sqlglot can't parse
     ddl_text = re.sub(r"^\s*GO\s*$", "", ddl_text, flags=re.IGNORECASE | re.MULTILINE)
     ddl_text = re.sub(r"^\s*USE\s+\S+\s*;?\s*$", "", ddl_text, flags=re.IGNORECASE | re.MULTILINE)
+    # Strip SSMS-generated storage options: WITH (PAD_INDEX = OFF, ...)
+    ddl_text = re.sub(r"\s*WITH\s*\(\s*PAD_INDEX\b[^)]*\)", "", ddl_text, flags=re.IGNORECASE)
+    # Strip ON [filegroup] / TEXTIMAGE_ON [filegroup]
+    ddl_text = re.sub(r"\bTEXTIMAGE_ON\s+\[[^\]]+\]", "", ddl_text, flags=re.IGNORECASE)
+    ddl_text = re.sub(r"\s+ON\s+\[[^\]]+\]", "", ddl_text, flags=re.IGNORECASE)
 
     try:
         statements = sqlglot.parse(ddl_text, dialect=dialect, error_level=sqlglot.ErrorLevel.WARN)
