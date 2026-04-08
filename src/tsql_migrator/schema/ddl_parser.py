@@ -51,6 +51,10 @@ def load_ddl_file(
     # Strip ON [filegroup] / TEXTIMAGE_ON [filegroup]
     ddl_text = re.sub(r"\bTEXTIMAGE_ON\s+\[[^\]]+\]", "", ddl_text, flags=re.IGNORECASE)
     ddl_text = re.sub(r"\s+ON\s+\[[^\]]+\]", "", ddl_text, flags=re.IGNORECASE)
+    # Ensure semicolon before each CREATE TABLE — handles files that use SSMS comment
+    # headers or blank lines as separators instead of GO or ;
+    parts = re.split(r"(?=\bCREATE\s+TABLE\b)", ddl_text, flags=re.IGNORECASE)
+    ddl_text = ";".join(parts)
 
     try:
         statements = sqlglot.parse(ddl_text, dialect=dialect, error_level=sqlglot.ErrorLevel.WARN)
