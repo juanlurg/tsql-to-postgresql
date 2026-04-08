@@ -52,3 +52,5 @@ frontend/.vite/
 *.log
 
 .claude/
+uv.lock
+schemas/
