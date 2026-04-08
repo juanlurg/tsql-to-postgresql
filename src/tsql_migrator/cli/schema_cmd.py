@@ -68,9 +68,11 @@ def diff(
         typer.Option(
             "--llm-assist/--no-llm-assist",
             help=(
-                "Use the LLM to suggest mappings for columns that deterministic "
-                "tiers could not confidently match. Suggestions are stored with "
-                "source='llm_suggested' and require human review before use."
+                "Use the LLM to suggest mappings for (1) source tables that "
+                "deterministic matching could not map to a target table, and "
+                "(2) columns within matched tables that scored below 0.60 confidence. "
+                "All LLM suggestions are stored with source='llm_suggested' and "
+                "require human review before use."
             ),
         ),
     ] = False,

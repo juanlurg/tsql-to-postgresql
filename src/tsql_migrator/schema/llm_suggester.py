@@ -29,7 +29,9 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from tsql_migrator.errors import LLMError
 from tsql_migrator.llm.prompts import (
     MAPPING_SUGGESTION_SYSTEM_PROMPT,
+    TABLE_MATCHING_SYSTEM_PROMPT,
     build_mapping_suggestion_prompt,
+    build_table_matching_prompt,
 )
 from tsql_migrator.schema.mapping_engine import MappingRow
 
@@ -229,6 +231,125 @@ class LLMSuggester:
         mappings = data.get("mappings")
         if not isinstance(mappings, list):
             raise LLMError("LLM mapping response missing 'mappings' list.")
+        return mappings
+
+
+class LLMTableMatcher:
+    """
+    Suggest target table matches for source tables that deterministic tiers could not match.
+
+    One LLM call is made for all unmatched source tables (batched), so the model has
+    full cross-table context. Suggestions require human review before use.
+
+    Anti-hallucination: every suggested tgt_table is validated against the actual set
+    of target tables in tgt_tables_data. Invalid suggestions are silently discarded.
+    """
+
+    def __init__(
+        self,
+        registry: "SchemaRegistry",
+        model: str | None = None,
+    ) -> None:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise LLMError(
+                "GEMINI_API_KEY environment variable is not set. "
+                "LLM table matching is unavailable."
+            )
+        self._client = genai.Client(api_key=api_key)
+        self._model_name = model or os.getenv("LLM_MODEL", "gemini-2.0-flash")
+
+    def suggest(
+        self,
+        unmatched_src: list[dict],
+        tgt_tables_data: dict[tuple, dict],
+    ) -> list[dict]:
+        """
+        Match unmatched source tables to target tables via LLM.
+
+        Args:
+            unmatched_src: Source table dicts (schema, table, cols) with no deterministic match.
+            tgt_tables_data: All target table data keyed by (norm_schema, norm_table).
+
+        Returns:
+            Validated list of dicts: {src_schema, src_table, tgt_schema, tgt_table, reasoning}.
+            Only entries where tgt_table actually exists in tgt_tables_data are returned.
+        """
+        if not unmatched_src or not tgt_tables_data:
+            return []
+
+        tgt_list = [
+            {"schema": v["schema"], "table": v["table"], "cols": v["cols"]}
+            for v in tgt_tables_data.values()
+        ]
+        prompt = build_table_matching_prompt(
+            unmatched_src=[
+                {"schema": s["schema"], "table": s["table"], "cols": s["cols"]}
+                for s in unmatched_src
+            ],
+            tgt_tables=tgt_list,
+        )
+
+        raw = self._call_llm(prompt)
+        matches = self._parse_response(raw)
+
+        # Anti-hallucination: only keep matches whose target actually exists
+        valid_tgt_keys = set(tgt_tables_data.keys())
+        validated = []
+        for m in matches:
+            tgt_schema = m.get("tgt_schema")
+            tgt_table = m.get("tgt_table")
+            if tgt_table is None or tgt_schema is None:
+                continue
+            key = (tgt_schema.lower().strip(), tgt_table.lower().strip())
+            if key not in valid_tgt_keys:
+                logger.debug(
+                    "LLM suggested non-existent target table '%s.%s' — discarded",
+                    tgt_schema,
+                    tgt_table,
+                )
+                continue
+            validated.append(m)
+
+        return validated
+
+    @retry(
+        retry=retry_if_exception_type(genai_errors.APIError),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
+    def _call_llm(self, prompt: str) -> str:
+        try:
+            response = self._client.models.generate_content(
+                model=self._model_name,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=TABLE_MATCHING_SYSTEM_PROMPT,
+                    temperature=0,
+                    max_output_tokens=2048,
+                ),
+            )
+        except genai_errors.APIError as e:
+            raise LLMError(f"Gemini API error during table matching: {e}") from e
+        return response.text or ""
+
+    def _parse_response(self, content: str) -> list[dict]:
+        stripped = content.strip()
+        if stripped.startswith("```"):
+            lines = stripped.splitlines()
+            stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError as e:
+            raise LLMError(
+                f"LLM returned non-JSON for table matching: {e}\n\nResponse:\n{content[:500]}"
+            ) from e
+
+        mappings = data.get("table_mappings")
+        if not isinstance(mappings, list):
+            raise LLMError("LLM table matching response missing 'table_mappings' list.")
         return mappings
 
 

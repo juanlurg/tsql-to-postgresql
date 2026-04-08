@@ -108,6 +108,67 @@ def build_mapping_suggestion_prompt(
     )
 
 
+TABLE_MATCHING_SYSTEM_PROMPT = """\
+You are a database schema migration expert. Given a list of SQL Server source tables and \
+Amazon Redshift target tables (with their columns), match each source table to its semantic \
+equivalent in the target schema.
+
+Rules:
+1. Output ONLY valid JSON matching the schema below. No prose, no markdown fences.
+2. tgt_schema and tgt_table MUST exactly match names from the provided target table list. Never invent names.
+3. Use null for tgt_schema and tgt_table when no reasonable semantic match exists.
+4. reasoning must briefly explain the match or why there is none.
+
+Output JSON schema:
+{
+  "table_mappings": [
+    {
+      "src_schema": "<source schema>",
+      "src_table": "<source table name>",
+      "tgt_schema": "<target schema or null>",
+      "tgt_table": "<target table name or null>",
+      "reasoning": "<brief explanation>"
+    }
+  ]
+}
+"""
+
+
+def build_table_matching_prompt(
+    unmatched_src: list[dict],
+    tgt_tables: list[dict],
+) -> str:
+    """
+    Build the user message for a table matching request.
+
+    Args:
+        unmatched_src: Source tables with no deterministic match.
+            Each dict has keys: schema, table, cols (list of {name, type}).
+        tgt_tables: All available target tables.
+            Each dict has keys: schema, table, cols (list of {name, type}).
+    """
+    def _col_summary(cols: list[dict]) -> str:
+        return ", ".join(f"{c['name']} {c['type']}" for c in cols[:20])
+
+    lines = ["## Source tables without a match (SQL Server):\n"]
+    for src in unmatched_src:
+        lines.append(f"### {src['schema']}.{src['table']}")
+        lines.append(f"  {_col_summary(src['cols'])}")
+        lines.append("")
+
+    lines.append("## Available target tables (Redshift):\n")
+    for tgt in tgt_tables:
+        lines.append(f"### {tgt['schema']}.{tgt['table']}")
+        lines.append(f"  {_col_summary(tgt['cols'])}")
+        lines.append("")
+
+    lines.append(
+        "Match each source table to its Redshift equivalent. "
+        "Respond with JSON only."
+    )
+    return "\n".join(lines)
+
+
 def build_ddl_context(
     table_ddls: list[dict[str, str]],
 ) -> str:

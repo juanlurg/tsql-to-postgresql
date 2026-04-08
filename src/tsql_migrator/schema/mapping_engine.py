@@ -161,6 +161,9 @@ class MappingEngine:
                 }
 
         results: list[MappingRow] = []
+        unmatched_src: list[dict] = []
+
+        # Phase 1: deterministic table matching (exact + snake_case fuzzy)
         for src_key, src_data in src_tables_data.items():
             tgt_data = tgt_tables_data.get(src_key)
 
@@ -173,68 +176,56 @@ class MappingEngine:
                         break
 
             if tgt_data is None:
-                # Source table has no matching target — emit unmatched rows so they
-                # appear in the CSV and the user can see what needs mapping.
-                for src_col in src_data["cols"]:
-                    results.append(MappingRow(
-                        src_schema=src_data["schema"],
-                        src_table=src_data["table"],
-                        src_column=src_col["name"],
-                        src_type=src_col["type"],
-                        tgt_schema="",
-                        tgt_table="",
-                        tgt_column=None,
-                        confidence=0.0,
-                        source="auto_fuzzy",
-                        approved=False,
-                        notes="NO TARGET TABLE",
-                    ))
+                unmatched_src.append(src_data)
                 continue
 
-            tgt_schema = tgt_data["schema"]
-            tgt_tname = tgt_data["table"]
-            tgt_cols: dict[str, dict] = tgt_data["cols"]
-
-            # Save table mapping
-            self.registry.upsert_table_mapping(
-                src_schema=src_data["schema"],
-                src_table=src_data["table"],
-                tgt_schema=tgt_schema,
-                tgt_table=tgt_tname,
-                confidence=0.95,
-                approved=True,
+            results.extend(
+                self._process_matched_pair(src_data, tgt_data)
             )
 
-            for src_col in src_data["cols"]:
-                tgt_col, confidence, mapping_source = _match_column(
-                    src_col["name"], src_col["type"], tgt_cols
-                )
-                approved = confidence >= 0.90
+        # Phase 2: LLM-assisted table matching for sources with no deterministic match
+        if llm_assist and unmatched_src:
+            import logging
+            from tsql_migrator.errors import LLMError
+            from tsql_migrator.schema.llm_suggester import LLMTableMatcher
 
-                self.registry.upsert_column_mapping(
-                    src_schema=src_data["schema"],
-                    src_table=src_data["table"],
-                    src_col=src_col["name"],
-                    tgt_schema=tgt_schema,
-                    tgt_table=tgt_tname,
-                    tgt_col=tgt_col,
-                    confidence=confidence,
-                    source=mapping_source,
-                    approved=approved,
+            _log = logging.getLogger(__name__)
+            try:
+                matcher = LLMTableMatcher(self.registry)
+                llm_table_matches = matcher.suggest(unmatched_src, tgt_tables_data)
+            except LLMError as e:
+                _log.warning("LLM table matching unavailable, skipping: %s", e)
+                llm_table_matches = []
+
+            llm_matched_src = {m["src_table"].lower() for m in llm_table_matches}
+
+            for match in llm_table_matches:
+                tgt_key = (_normalize(match["tgt_schema"]), _normalize(match["tgt_table"]))
+                tgt_data = tgt_tables_data.get(tgt_key)
+                src_data = next(
+                    (s for s in unmatched_src if s["table"].lower() == match["src_table"].lower()),
+                    None,
                 )
-                results.append(MappingRow(
-                    src_schema=src_data["schema"],
-                    src_table=src_data["table"],
-                    src_column=src_col["name"],
-                    src_type=src_col["type"],
-                    tgt_schema=tgt_schema,
-                    tgt_table=tgt_tname,
-                    tgt_column=tgt_col,
-                    confidence=confidence,
-                    source=mapping_source,
-                    approved=approved,
-                    notes="" if approved else "REVIEW REQUIRED",
-                ))
+                if tgt_data is None or src_data is None:
+                    continue
+                reasoning = match.get("reasoning", "")
+                note_prefix = f"LLM table match: {reasoning}" if reasoning else "LLM table match"
+                results.extend(
+                    self._process_matched_pair(
+                        src_data, tgt_data,
+                        table_confidence=0.65,
+                        table_source="llm_suggested",
+                        note_prefix=note_prefix,
+                    )
+                )
+
+            # Emit NO TARGET TABLE for tables the LLM also couldn't match
+            for src_data in unmatched_src:
+                if src_data["table"].lower() not in llm_matched_src:
+                    self._emit_no_target_rows(results, src_data)
+        else:
+            for src_data in unmatched_src:
+                self._emit_no_target_rows(results, src_data)
 
         if not llm_assist:
             return results
@@ -246,7 +237,10 @@ class MappingEngine:
 
         _log = logging.getLogger(__name__)
 
-        low_conf = [r for r in results if r.confidence < self._LLM_ASSIST_THRESHOLD]
+        low_conf = [
+            r for r in results
+            if r.confidence < self._LLM_ASSIST_THRESHOLD and r.tgt_table
+        ]
         if not low_conf:
             return results
 
@@ -293,6 +287,87 @@ class MappingEngine:
                 results[result_index[key]] = llm_row
 
         return results
+
+    def _process_matched_pair(
+        self,
+        src_data: dict,
+        tgt_data: dict,
+        table_confidence: float = 0.95,
+        table_source: str = "auto_exact",
+        note_prefix: str = "",
+    ) -> list["MappingRow"]:
+        """Save a matched (src, tgt) table pair to the registry and return column MappingRows."""
+        tgt_schema = tgt_data["schema"]
+        tgt_tname = tgt_data["table"]
+        tgt_cols: dict[str, dict] = tgt_data["cols"]
+
+        self.registry.upsert_table_mapping(
+            src_schema=src_data["schema"],
+            src_table=src_data["table"],
+            tgt_schema=tgt_schema,
+            tgt_table=tgt_tname,
+            confidence=table_confidence,
+            source=table_source,
+            approved=(table_confidence >= 0.90),
+        )
+
+        rows = []
+        for src_col in src_data["cols"]:
+            tgt_col, confidence, mapping_source = _match_column(
+                src_col["name"], src_col["type"], tgt_cols
+            )
+            approved = confidence >= 0.90
+
+            notes_parts = []
+            if note_prefix:
+                notes_parts.append(note_prefix)
+            if not approved:
+                notes_parts.append("REVIEW REQUIRED")
+            notes = " | ".join(notes_parts)
+
+            self.registry.upsert_column_mapping(
+                src_schema=src_data["schema"],
+                src_table=src_data["table"],
+                src_col=src_col["name"],
+                tgt_schema=tgt_schema,
+                tgt_table=tgt_tname,
+                tgt_col=tgt_col,
+                confidence=confidence,
+                source=mapping_source,
+                approved=approved,
+            )
+            rows.append(MappingRow(
+                src_schema=src_data["schema"],
+                src_table=src_data["table"],
+                src_column=src_col["name"],
+                src_type=src_col["type"],
+                tgt_schema=tgt_schema,
+                tgt_table=tgt_tname,
+                tgt_column=tgt_col,
+                confidence=confidence,
+                source=mapping_source,
+                approved=approved,
+                notes=notes,
+            ))
+        return rows
+
+    @staticmethod
+    def _emit_no_target_rows(results: list["MappingRow"], src_data: dict) -> None:
+        """Append NO TARGET TABLE placeholder rows for a source table with no match."""
+        for src_col in src_data["cols"]:
+            results.append(MappingRow(
+                src_schema=src_data["schema"],
+                src_table=src_data["table"],
+                src_column=src_col["name"],
+                src_type=src_col["type"],
+                tgt_schema="",
+                tgt_table="",
+                tgt_column=None,
+                confidence=0.0,
+                source="auto_fuzzy",
+                approved=False,
+                notes="NO TARGET TABLE",
+            ))
 
     def export_csv(self, rows: list[MappingRow], path: str) -> None:
         """Export mapping rows to a CSV file for human review."""
