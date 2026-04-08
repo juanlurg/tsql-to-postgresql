@@ -112,6 +112,36 @@ tsql-migrator translate --input query.sql --schema sqlserver
 - `FOR XML`
 - Linked server references
 
+## Web UI
+
+A React + TypeScript frontend lives in `frontend/`. It connects to the FastAPI service and provides two views:
+
+- **Translate** — Monaco SQL editor, paste T-SQL on the left, get Redshift SQL on the right with inline diagnostics
+- **Schema Mappings** — browse and approve/edit column rename mappings produced by `schema diff`
+
+### Running the UI
+
+```bash
+# 1. Start the API server (default: http://localhost:8000)
+tsql-migrator serve
+
+# 2. In a separate terminal, start the dev server
+cd frontend
+npm install
+npm run dev          # Vite proxies /api → localhost:8000
+```
+
+Open `http://localhost:5173` in your browser.
+
+### Building for production
+
+```bash
+cd frontend
+npm run build        # output in frontend/dist/
+```
+
+The FastAPI server can serve the built `dist/` folder as static files if you point it at the right path.
+
 ## Development
 
 ```bash
