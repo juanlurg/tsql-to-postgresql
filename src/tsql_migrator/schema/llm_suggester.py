@@ -278,8 +278,10 @@ class LLMTableMatcher:
         if not unmatched_src or not tgt_tables_data:
             return []
 
+        # tgt_tables_data cols are stored as {norm_name: {name, type}} dicts —
+        # convert to lists so build_table_matching_prompt can slice them uniformly.
         tgt_list = [
-            {"schema": v["schema"], "table": v["table"], "cols": v["cols"]}
+            {"schema": v["schema"], "table": v["table"], "cols": list(v["cols"].values())}
             for v in tgt_tables_data.values()
         ]
         prompt = build_table_matching_prompt(
