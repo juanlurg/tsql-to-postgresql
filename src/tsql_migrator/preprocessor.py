@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from tsql_migrator.errors import HardError
 
 # GO on its own line, optionally preceded/followed by whitespace, with optional count
-_GO_PATTERN = re.compile(r"^\s*GO(\s+\d+)?\s*$", re.IGNORECASE | re.MULTILINE)
+_GO_PATTERN = re.compile(r"^\s*GO\b(\s+\d+)?\s*$", re.IGNORECASE | re.MULTILINE)
 
 # Block comment: /* ... */ (handles nested comments via iterative stripping)
 _BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
@@ -42,7 +42,7 @@ def preprocess(sql: str) -> PreprocessResult:
     original = sql
 
     # Check for GO with count (e.g. GO 3) — unsupported
-    go_with_count = re.search(r"^\s*GO\s+(\d+)\s*$", sql, re.IGNORECASE | re.MULTILINE)
+    go_with_count = re.search(r"^\s*GO\b\s+(\d+)\s*$", sql, re.IGNORECASE | re.MULTILINE)
     if go_with_count:
         raise HardError(
             "GO with repeat count (e.g. 'GO 3') is not supported — "

@@ -173,6 +173,22 @@ class MappingEngine:
                         break
 
             if tgt_data is None:
+                # Source table has no matching target — emit unmatched rows so they
+                # appear in the CSV and the user can see what needs mapping.
+                for src_col in src_data["cols"]:
+                    results.append(MappingRow(
+                        src_schema=src_data["schema"],
+                        src_table=src_data["table"],
+                        src_column=src_col["name"],
+                        src_type=src_col["type"],
+                        tgt_schema="",
+                        tgt_table="",
+                        tgt_column=None,
+                        confidence=0.0,
+                        source="auto_fuzzy",
+                        approved=False,
+                        notes="NO TARGET TABLE",
+                    ))
                 continue
 
             tgt_schema = tgt_data["schema"]

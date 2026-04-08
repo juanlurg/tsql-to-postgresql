@@ -44,7 +44,7 @@ def load_ddl_file(
         raise SchemaError(f"Cannot read DDL file '{path}': {e}") from e
 
     # Strip T-SQL constructs that sqlglot can't parse
-    ddl_text = re.sub(r"^\s*GO\s*$", ";", ddl_text, flags=re.IGNORECASE | re.MULTILINE)
+    ddl_text = re.sub(r"^\s*GO\b\s*$", ";", ddl_text, flags=re.IGNORECASE | re.MULTILINE)
     ddl_text = re.sub(r"^\s*USE\s+\S+\s*;?\s*$", "", ddl_text, flags=re.IGNORECASE | re.MULTILINE)
     # Strip SSMS-generated storage options: WITH (PAD_INDEX = OFF, ...)
     ddl_text = re.sub(r"\s*WITH\s*\(\s*PAD_INDEX\b[^)]*\)", "", ddl_text, flags=re.IGNORECASE)
