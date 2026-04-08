@@ -17,24 +17,42 @@ from tsql_migrator.transforms.base import TransformContext, TransformPass
 _UNMAPPED_TEMPLATE = "/* UNMAPPED: {col} */"
 
 
+def _build_alias_map(ast: exp.Expression) -> dict:
+    """
+    Build {alias_lowercase → table_name} from all Table nodes in the AST.
+    Called after TableRenamer, so table_name values are already target (Redshift) names.
+    """
+    result = {}
+    for table in ast.find_all(exp.Table):
+        if table.alias:
+            result[table.alias.lower()] = table.name
+    return result
+
+
 class ColumnRenamer(TransformPass):
     """Rename column references based on schema registry mappings."""
 
     def transform(self, ast: exp.Expression, ctx: TransformContext) -> exp.Expression:
         if ctx.schema_registry is None:
             return ast  # No registry — skip column renaming
-        return ast.transform(self._rename_column, ctx)
+        alias_map = _build_alias_map(ast)
+        return ast.transform(self._rename_column, ctx, alias_map)
 
     @staticmethod
-    def _rename_column(node: exp.Expression, ctx: TransformContext) -> exp.Expression:
+    def _rename_column(node: exp.Expression, ctx: TransformContext, alias_map: dict) -> exp.Expression:
         if not isinstance(node, exp.Column):
             return node
 
         col_name = node.name
-        table_ref = node.table  # may be None if unqualified
+        table_ref = node.table  # alias, table name, or empty
 
-        # Resolve which table this column belongs to
-        # For now: if table is specified, use it; otherwise we cannot scope it safely
+        # Resolve alias → target table name (alias_map built from post-TableRenamer AST)
+        if table_ref and table_ref.lower() in alias_map:
+            table_ref = alias_map[table_ref.lower()]
+        # Resolve source table name → target table name (e.g. SalesOrderHeader → sales_order_header)
+        elif table_ref and table_ref.lower() in ctx.table_renames:
+            table_ref = ctx.table_renames[table_ref.lower()]
+
         if not table_ref:
             # Unqualified column — attempt lookup across all mapped tables
             # If ambiguous, leave as-is with a warning

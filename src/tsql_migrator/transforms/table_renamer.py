@@ -45,6 +45,7 @@ class TableRenamer(TransformPass):
                 new_schema = mapping.tgt_table_schema
                 new_table = mapping.tgt_table_name
                 ctx.renames_applied += 1
+                ctx.table_renames[table_name.lower()] = new_table
                 return _rebuild_table(node, new_schema, new_table)
 
         # Fallback: apply default schema map and keep table name

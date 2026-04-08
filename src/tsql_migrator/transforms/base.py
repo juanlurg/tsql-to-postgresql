@@ -39,6 +39,9 @@ class TransformContext:
     llm_candidates: list[exp.Expression] = field(default_factory=list)
     schema_registry: "SchemaRegistry | None" = None
     renames_applied: int = 0
+    # Populated by TableRenamer: src_table_name.lower() → tgt_table_name
+    # Used by ColumnRenamer to resolve non-alias column qualifiers after table rename
+    table_renames: dict = field(default_factory=dict)
 
     def info(self, message: str, line: int | None = None) -> None:
         self.annotations.append(Annotation(message=message, severity=Severity.INFO, line=line))
