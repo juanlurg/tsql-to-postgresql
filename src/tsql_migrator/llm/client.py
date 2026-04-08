@@ -7,10 +7,12 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
+from typing import Literal
 
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
+from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from tsql_migrator.errors import LLMError
@@ -24,6 +26,14 @@ class LLMTranslationResult:
     unmapped_columns: list[str] = field(default_factory=list)
     confidence: str = "medium"   # "high" | "medium" | "low"
     migration_todos: list[str] = field(default_factory=list)
+
+
+class _TranslationResponse(BaseModel):
+    translated_sql: str
+    changes_made: list[str]
+    unmapped_columns: list[str]
+    confidence: Literal["high", "medium", "low"]
+    migration_todos: list[str]
 
 
 class LLMClient:
@@ -75,6 +85,8 @@ class LLMClient:
                 contents=user_message,
                 config=genai_types.GenerateContentConfig(
                     system_instruction=self._system_instruction,
+                    response_mime_type="application/json",
+                    response_schema=_TranslationResponse,
                     temperature=0,
                     max_output_tokens=self._max_tokens,
                 ),
@@ -86,15 +98,9 @@ class LLMClient:
         return self._parse_response(content)
 
     def _parse_response(self, content: str) -> LLMTranslationResult:
-        """Parse and validate the LLM JSON response."""
-        # Strip markdown fences if the model added them despite instructions
-        stripped = content.strip()
-        if stripped.startswith("```"):
-            lines = stripped.splitlines()
-            stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
+        """Parse the structured JSON response from the LLM."""
         try:
-            data = json.loads(stripped)
+            data = json.loads(content)
         except json.JSONDecodeError as e:
             raise LLMError(
                 f"LLM returned non-JSON response: {e}\n\nResponse:\n{content[:500]}"

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
+from pydantic import BaseModel
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from tsql_migrator.errors import LLMError
@@ -42,6 +43,30 @@ logger = logging.getLogger(__name__)
 
 # LLM suggestions are never auto-approved regardless of returned confidence.
 _LLM_SUGGESTION_CONFIDENCE = 0.65
+
+
+# ── Structured-output response schemas ────────────────────────────────────────
+
+class _ColumnMappingItem(BaseModel):
+    src_column: str
+    tgt_column: str | None
+    reasoning: str
+
+
+class _ColumnMappingResponse(BaseModel):
+    mappings: list[_ColumnMappingItem]
+
+
+class _TableMappingItem(BaseModel):
+    src_schema: str
+    src_table: str
+    tgt_schema: str | None
+    tgt_table: str | None
+    reasoning: str
+
+
+class _TableMappingResponse(BaseModel):
+    table_mappings: list[_TableMappingItem]
 
 
 @dataclass
@@ -207,8 +232,10 @@ class LLMSuggester:
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     system_instruction=self._system_instruction,
+                    response_mime_type="application/json",
+                    response_schema=_ColumnMappingResponse,
                     temperature=0,
-                    max_output_tokens=2048,
+                    max_output_tokens=8192,
                 ),
             )
         except genai_errors.APIError as e:
@@ -216,18 +243,12 @@ class LLMSuggester:
         return response.text or ""
 
     def _parse_response(self, content: str) -> list[dict]:
-        stripped = content.strip()
-        if stripped.startswith("```"):
-            lines = stripped.splitlines()
-            stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
         try:
-            data = json.loads(stripped)
+            data = json.loads(content)
         except json.JSONDecodeError as e:
             raise LLMError(
                 f"LLM returned non-JSON for mapping suggestion: {e}\n\nResponse:\n{content[:500]}"
             ) from e
-
         mappings = data.get("mappings")
         if not isinstance(mappings, list):
             raise LLMError("LLM mapping response missing 'mappings' list.")
@@ -328,8 +349,10 @@ class LLMTableMatcher:
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     system_instruction=TABLE_MATCHING_SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    response_schema=_TableMappingResponse,
                     temperature=0,
-                    max_output_tokens=2048,
+                    max_output_tokens=8192,
                 ),
             )
         except genai_errors.APIError as e:
@@ -337,18 +360,12 @@ class LLMTableMatcher:
         return response.text or ""
 
     def _parse_response(self, content: str) -> list[dict]:
-        stripped = content.strip()
-        if stripped.startswith("```"):
-            lines = stripped.splitlines()
-            stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
         try:
-            data = json.loads(stripped)
+            data = json.loads(content)
         except json.JSONDecodeError as e:
             raise LLMError(
                 f"LLM returned non-JSON for table matching: {e}\n\nResponse:\n{content[:500]}"
             ) from e
-
         mappings = data.get("table_mappings")
         if not isinstance(mappings, list):
             raise LLMError("LLM table matching response missing 'table_mappings' list.")
